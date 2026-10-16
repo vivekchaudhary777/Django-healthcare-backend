@@ -1,9 +1,13 @@
 from django.contrib import admin
 from django.urls import include, path
-from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView as SimpleJWTTokenRefreshView
 
 from config.views import health_check
 from accounts.views import LoginView, RegisterView
+
+
+class TokenRefreshView(SimpleJWTTokenRefreshView):
+    throttle_scope = "token_refresh"
 
 urlpatterns = [
     path("admin/", admin.site.urls),

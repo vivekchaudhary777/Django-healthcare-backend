@@ -1,8 +1,4 @@
-import django.contrib.auth.models
-import django.contrib.auth.validators
-import django.utils.timezone
 from django.db import migrations, models
-import django.db.models.deletion
 from django.db.models.functions import Lower
 import accounts.models
 

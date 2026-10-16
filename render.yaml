@@ -2,13 +2,13 @@ databases:
   - name: healthcare-db
     databaseName: healthcare
     user: healthcare
-    plan: basic-256mb
+    plan: 0.1c-256mb
 
 services:
   - type: web
     name: healthcare-backend-api
     runtime: python
-    plan: starter
+    plan: 0.5c-512mb
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
     preDeployCommand: python manage.py migrate --noinput
     startCommand: gunicorn config.wsgi:application

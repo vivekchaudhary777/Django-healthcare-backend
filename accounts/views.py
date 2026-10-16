@@ -9,11 +9,13 @@ from .serializers import LoginSerializer, RegisterSerializer
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
+    throttle_scope = "register"
 
 
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = [AllowAny]
+    throttle_scope = "login"
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

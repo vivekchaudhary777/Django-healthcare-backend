@@ -37,6 +37,8 @@ DATABASE_URL=postgresql://healthcare:your-password@localhost:5432/healthcare
 
 Set a private random `SECRET_KEY` and `DEBUG=False` for production. `ALLOWED_HOSTS` is a comma-separated list. The application loads `.env` for local development; never commit it.
 
+Generate a secret locally with `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`; place the result in `.env` and do not share or commit it.
+
 Initialize and run:
 
 ```powershell
@@ -63,7 +65,7 @@ Login with `POST /api/auth/login/`:
 {"email":"alex@example.com","password":"Use-a-strong-password-123"}
 ```
 
-Success (HTTP 200): `{"access":"<JWT>","refresh":"<JWT>"}`. Access tokens last 15 minutes and refresh tokens one day. Refresh at `POST /api/auth/token/refresh/` with `{"refresh":"<JWT>"}`. Send the access token on protected requests as `Authorization: Bearer <access>`.
+Success (HTTP 200): `{"access":"<JWT>","refresh":"<JWT>"}`. Access tokens last 15 minutes and refresh tokens one day. Refresh at `POST /api/auth/token/refresh/` with `{"refresh":"<JWT>"}`; refresh rotation is enabled and the previous refresh token is blacklisted. Login, registration, and refresh endpoints have per-IP throttles (10/minute, 5/hour, and 30/minute). Send the access token on protected requests as `Authorization: Bearer <access>`.
 
 ## Endpoints
 
@@ -107,7 +109,7 @@ Create an assignment:
 {"patient":1,"doctor":1}
 ```
 
-An assignment response has `id`, `patient`, `doctor`, and `created_at`. Duplicate patient-doctor pairs return HTTP 400. Cross-owner patient/mapping access returns 404 so record existence is not disclosed. Missing resources return 404, invalid fields return 400, missing/invalid authentication returns 401, and deletion of an assigned doctor returns 409.
+An assignment response has `id`, `patient`, `doctor`, and `created_at`. Duplicate patient-doctor pairs return HTTP 400. Cross-owner patient/mapping access returns 404 so record existence is not disclosed. Missing resources return 404, invalid fields return 400, missing/invalid authentication returns 401, auth throttles return 429, and deletion of an assigned doctor returns 409.
 
 Example using curl:
 
@@ -127,18 +129,19 @@ The same requests can be imported into Postman or run with curl. JSON validation
 ```powershell
 python manage.py test
 python manage.py check
-python manage.py check --deploy
 python manage.py makemigrations --check --dry-run
 ```
 
-Tests cover registration, case-insensitive duplicates, login, token-protected access, patient CRUD/isolation, doctor CRUD/permissions, mapping creation/list/retrieval/deletion, duplicate and invalid references, health, and doctor deletion protection. Configure a PostgreSQL `DATABASE_URL` before tests to exercise them against PostgreSQL; the default test database otherwise uses SQLite.
+Run the deployment check with production settings loaded. For example, in PowerShell set `DEBUG=False`, a generated `SECRET_KEY`, and the deployment's `ALLOWED_HOSTS`, then run `python manage.py check --deploy`. With the local `DEBUG=True` configuration, Django correctly reports production-only security warnings.
+
+Tests cover registration, case-insensitive duplicates, successful and failed login, JWT-protected access, refresh rotation and revocation, patient CRUD/isolation, doctor CRUD/permissions, mapping creation/list/retrieval/deletion and cross-owner privacy, duplicate and invalid references, health, and doctor deletion protection. Configure a PostgreSQL `DATABASE_URL` before tests to exercise them against PostgreSQL; the default test database otherwise uses SQLite.
 
 ## Deployment (Render blueprint)
 
-`render.yaml` defines a Gunicorn web service, managed PostgreSQL, generated secret, HTTPS redirect, static collection, and a pre-deploy migration. Review the blueprint's current pricing and service availability before provisioning; the configuration is prepared, but this workspace has no Render account credentials or deployment access, so no hosted service or URL is claimed. Set `ALLOWED_HOSTS` to the actual service hostname if it changes. Configure environment variables in the provider dashboard, never in source control.
+`render.yaml` defines a Gunicorn web service, managed PostgreSQL, generated secret, HTTPS redirect, static collection, and a pre-deploy migration. It uses Render's current `0.5c-512mb` web and `0.1c-256mb` PostgreSQL plan IDs. Based on [Render's current pricing](https://render.com/pricing), these are approximately $7/month and $6/month respectively; the free PostgreSQL plan expires after 30 days, so it is not configured for a persistent production database. This workspace has no Render account access, so no service was provisioned and no hosted URL is claimed. Set `ALLOWED_HOSTS` to the actual service hostname if it changes. Configure environment variables in the provider dashboard, never in source control.
 
 The API's production database is PostgreSQL when `DATABASE_URL` is supplied. Production startup requires `DEBUG=False`, a strong `SECRET_KEY`, and the correct `ALLOWED_HOSTS`. Health monitoring should use `/api/health/`.
 
 ## Repository status and limitations
 
-The source directory initially had no Git repository or remote configured and the GitHub CLI was not installed. This local implementation therefore does not claim a commit or publication. Publishing requires an authenticated GitHub repository and remote. No live deployment, PostgreSQL server, or production API has been configured or verified in this environment.
+The source directory initially had no Git remote and the GitHub CLI is not installed. The project is committed locally, but publishing requires authenticated GitHub access and a repository remote. No live deployment, PostgreSQL server, or production API has been configured or verified in this environment.

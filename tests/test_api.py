@@ -1,7 +1,6 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -38,8 +37,21 @@ class HealthcareAPITests(APITestCase):
         failed = self.client.post("/api/auth/login/", {
             "email": "owner@example.com", "password": "wrong"
         }, format="json")
-        self.assertEqual(failed.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(str(failed.data["non_field_errors"][0]), "Invalid email or password.")
+        self.assertEqual(failed.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(str(failed.data["detail"]), "Invalid email or password.")
+
+    def test_refresh_rotates_and_revokes_old_token(self):
+        self.client.force_authenticate(None)
+        login = self.client.post("/api/auth/login/", {
+            "email": "owner@example.com", "password": "Strong-password-912"
+        }, format="json")
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+        old_refresh = login.data["refresh"]
+        rotated = self.client.post("/api/auth/token/refresh/", {"refresh": old_refresh}, format="json")
+        self.assertEqual(rotated.status_code, status.HTTP_200_OK)
+        self.assertIn("refresh", rotated.data)
+        revoked = self.client.post("/api/auth/token/refresh/", {"refresh": old_refresh}, format="json")
+        self.assertEqual(revoked.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_patient_crud_and_owner_isolation(self):
         response = self.client.post("/api/patients/", {"name": "Patient One"}, format="json")
@@ -79,6 +91,11 @@ class HealthcareAPITests(APITestCase):
     def test_mapping_assignment_read_duplicate_and_owner_deletion(self):
         patient = Patient.objects.create(owner=self.user, name="Patient")
         doctor = Doctor.objects.create(created_by=self.user, name="Doctor", specialization="Family Medicine")
+        other_patient = Patient.objects.create(owner=self.other, name="Private Patient")
+        other_doctor = Doctor.objects.create(created_by=self.other, name="Private Doctor", specialization="Oncology")
+        other_mapping = PatientDoctorMapping.objects.create(
+            patient=other_patient, doctor=other_doctor, created_by=self.other
+        )
         self.client.force_authenticate(self.user)
         create = self.client.post("/api/mappings/", {"patient": patient.id, "doctor": doctor.id}, format="json")
         self.assertEqual(create.status_code, 201)
@@ -87,16 +104,21 @@ class HealthcareAPITests(APITestCase):
         self.assertEqual(duplicate.status_code, 400)
         self.assertEqual(self.client.get("/api/mappings/").data["count"], 1)
         self.assertEqual(self.client.get(f"/api/mappings/{patient.id}/").data[0]["id"], doctor.id)
+        self.assertNotIn("owner@example.com", str(self.client.get("/api/mappings/").data))
         self.assertEqual(self.client.get("/api/mappings/999999/").status_code, 404)
         invalid = self.client.post("/api/mappings/", {"patient": 999999, "doctor": doctor.id}, format="json")
         self.assertEqual(invalid.status_code, 400)
         self.client.force_authenticate(self.other)
-        self.assertEqual(self.client.get("/api/mappings/").data["count"], 0)
+        other_list = self.client.get("/api/mappings/").data
+        self.assertEqual(other_list["count"], 1)
+        self.assertEqual(other_list["results"][0]["id"], other_mapping.id)
+        self.assertEqual(self.client.get(f"/api/mappings/{patient.id}/").status_code, 404)
         self.assertEqual(self.client.delete(f"/api/mappings/{mapping_id}/").status_code, 404)
         self.assertEqual(self.client.post("/api/mappings/", {"patient": patient.id, "doctor": doctor.id}, format="json").status_code, 400)
         self.client.force_authenticate(self.user)
         self.assertEqual(self.client.delete(f"/api/mappings/{mapping_id}/").status_code, 204)
-        self.assertFalse(PatientDoctorMapping.objects.exists())
+        self.assertFalse(PatientDoctorMapping.objects.filter(pk=mapping_id).exists())
+        self.assertTrue(PatientDoctorMapping.objects.filter(pk=other_mapping.id).exists())
 
     def test_doctor_delete_rejected_when_assigned(self):
         patient = Patient.objects.create(owner=self.user, name="Patient")
