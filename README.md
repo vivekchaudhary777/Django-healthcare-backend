@@ -32,12 +32,17 @@ Without `DATABASE_URL`, the application uses `db.sqlite3`. For the verified loca
 DATABASE_URL=postgresql://healthcare_test:<URL_ENCODED_PASSWORD>@127.0.0.1:5432/healthcare_test
 ```
 
-Replace the placeholder locally; URL-encode special characters in the password. Never put the real password in `.env.example` or source control.
+Replace the placeholder locally. URL-encode reserved characters in the password before putting it in the URL; for example, `@` becomes `%40`, `:` becomes `%3A`, and `%` becomes `%25`. Never put the real password in `.env.example` or source control.
 
-Apply migrations and start the development server:
+Apply database migrations:
 
 ```powershell
 python manage.py migrate
+```
+
+Start the development server:
+
+```powershell
 python manage.py runserver
 ```
 
@@ -111,9 +116,21 @@ Patient fields are name, date of birth, gender, email, phone, and address. Docto
 
 ## Tests and checks
 
+Run the automated tests:
+
 ```powershell
 python manage.py test
+```
+
+Run Django's system check:
+
+```powershell
 python manage.py check
+```
+
+Check that migrations match the models:
+
+```powershell
 python manage.py makemigrations --check --dry-run
 ```
 
