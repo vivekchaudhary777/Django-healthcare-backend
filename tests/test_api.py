@@ -60,6 +60,7 @@ class HealthcareAPITests(APITestCase):
         created = self.client.post("/api/patients/", {"name": "Patient One", "gender": "female"}, format="json")
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
         patient_id = created.data["id"]
+        self.assertEqual(self.client.get(f"/api/patients/{patient_id}/").status_code, status.HTTP_200_OK)
         self.assertEqual(self.client.get("/api/patients/").data["count"], 1)
         self.assertEqual(self.client.put(f"/api/patients/{patient_id}/", {"name": "Updated"}, format="json").status_code, 200)
         self.assertEqual(self.client.get("/api/patients/999999/").status_code, 404)
@@ -72,14 +73,20 @@ class HealthcareAPITests(APITestCase):
         self.assertEqual(invalid.status_code, 400)
 
     def test_doctor_crud_visibility_and_creator_permissions(self):
+        self.assertEqual(self.client.get("/api/doctors/").status_code, status.HTTP_401_UNAUTHORIZED)
         self.client.force_authenticate(self.user)
         response = self.client.post("/api/doctors/", {
             "name": "Ada Doctor", "specialization": "Cardiology", "phone": "555-0101"
         }, format="json")
         self.assertEqual(response.status_code, 201)
         doctor_id = response.data["id"]
+        other_doctor = Doctor.objects.create(
+            created_by=self.other, name="Another Doctor", specialization="Pediatrics"
+        )
         self.client.force_authenticate(self.other)
-        self.assertEqual(self.client.get("/api/doctors/").data["count"], 1)
+        listed_doctors = self.client.get("/api/doctors/").data
+        self.assertEqual(listed_doctors["count"], 2)
+        self.assertEqual({item["id"] for item in listed_doctors["results"]}, {doctor_id, other_doctor.id})
         self.assertEqual(self.client.get(f"/api/doctors/{doctor_id}/").status_code, 200)
         self.assertEqual(self.client.put(f"/api/doctors/{doctor_id}/", {"name": "Other"}, format="json").status_code, 404)
         self.assertEqual(self.client.delete(f"/api/doctors/{doctor_id}/").status_code, 404)
@@ -87,6 +94,8 @@ class HealthcareAPITests(APITestCase):
         self.assertEqual(self.client.put(f"/api/doctors/{doctor_id}/", {
             "name": "Ada Doctor", "specialization": "Neurology"
         }, format="json").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/doctors/{doctor_id}/").status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(self.client.get(f"/api/doctors/{doctor_id}/").status_code, status.HTTP_404_NOT_FOUND)
 
     def test_mapping_assignment_read_duplicate_and_owner_deletion(self):
         patient = Patient.objects.create(owner=self.user, name="Patient")
@@ -96,6 +105,9 @@ class HealthcareAPITests(APITestCase):
         other_mapping = PatientDoctorMapping.objects.create(
             patient=other_patient, doctor=other_doctor, created_by=self.other
         )
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get("/api/mappings/").status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(self.client.post("/api/mappings/", {"patient": patient.id, "doctor": doctor.id}, format="json").status_code, status.HTTP_401_UNAUTHORIZED)
         self.client.force_authenticate(self.user)
         create = self.client.post("/api/mappings/", {"patient": patient.id, "doctor": doctor.id}, format="json")
         self.assertEqual(create.status_code, 201)
@@ -108,6 +120,8 @@ class HealthcareAPITests(APITestCase):
         self.assertEqual(self.client.get("/api/mappings/999999/").status_code, 404)
         invalid = self.client.post("/api/mappings/", {"patient": 999999, "doctor": doctor.id}, format="json")
         self.assertEqual(invalid.status_code, 400)
+        invalid_doctor = self.client.post("/api/mappings/", {"patient": patient.id, "doctor": 999999}, format="json")
+        self.assertEqual(invalid_doctor.status_code, 400)
         self.client.force_authenticate(self.other)
         other_list = self.client.get("/api/mappings/").data
         self.assertEqual(other_list["count"], 1)

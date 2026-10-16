@@ -23,7 +23,6 @@ class MappingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This doctor is already assigned to this patient.")
         return attrs
 
-
     @transaction.atomic
     def create(self, validated_data):
         try:

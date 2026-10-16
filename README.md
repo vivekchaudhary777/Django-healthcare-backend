@@ -1,26 +1,17 @@
 # Healthcare Backend API
 
-A Django REST Framework API for account registration and JWT login, user-owned patient records, shared doctor discovery, and patient-doctor assignments. The PDF assignment's listed routes are implemented. PostgreSQL is the production database; SQLite is the zero-setup local default.
+A Django REST Framework API for user registration, JWT authentication, patient records, doctor records, and patient-doctor assignments. Patient and mapping queries are scoped to the authenticated patient owner.
 
-## Architecture and data policy
-
-- `accounts`: email-based custom user model, registration, login, JWTs.
-- `patients`: records belong to their creator; list and object querysets are scoped to that owner.
-- `doctors`: every authenticated user can list and retrieve every doctor. Only the creating user can update or delete a doctor. A doctor assigned to any patient cannot be deleted (HTTP 409).
-- `mappings`: assignment rows belong to the patient owner, are unique by patient and doctor, and protect doctors from deletion while assigned.
-- `config`: environment-based settings, URLs, database health endpoint, WSGI/ASGI.
-
-Patient fields: `name` (required), `date_of_birth` (optional, cannot be in the future), `gender` (`female`, `male`, `other`, `unspecified`), `email`, `phone`, and `address`. Doctor fields: `name`, `specialization` (required), `email`, `phone`, `clinic_address`. IDs and timestamps are server-managed.
-
-## Requirements
+## Stack
 
 - Python 3.10+
-- PostgreSQL 14+ for a PostgreSQL-backed local setup or deployment
-- Git (optional for local use)
+- Django 5.x and Django REST Framework
+- SimpleJWT
+- PostgreSQL in the Render configuration; SQLite is the local default
 
-## Local setup
+## Run locally
 
-PowerShell:
+In PowerShell from the project directory:
 
 ```powershell
 py -3 -m venv .venv
@@ -29,100 +20,94 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-The supplied `.env.example` uses SQLite. To use PostgreSQL, create a database and replace `DATABASE_URL` in `.env` with a PostgreSQL URL, for example:
+Edit `.env` and set a private `SECRET_KEY`. For local development, keep `DEBUG=True` and `ALLOWED_HOSTS=localhost,127.0.0.1`. Generate a key with:
 
-```dotenv
-DATABASE_URL=postgresql://healthcare:your-password@localhost:5432/healthcare
+```powershell
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
-Set a private random `SECRET_KEY` and `DEBUG=False` for production. `ALLOWED_HOSTS` is a comma-separated list. The application loads `.env` for local development; never commit it.
+Without `DATABASE_URL`, the application uses `db.sqlite3`. For the verified local PostgreSQL setup, create a `healthcare_test` database and a login role named `healthcare_test`, then set `DATABASE_URL` in `.env` with that role's password:
 
-Generate a secret locally with `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`; place the result in `.env` and do not share or commit it.
+```dotenv
+DATABASE_URL=postgresql://healthcare_test:<URL_ENCODED_PASSWORD>@127.0.0.1:5432/healthcare_test
+```
 
-Initialize and run:
+Replace the placeholder locally; URL-encode special characters in the password. Never put the real password in `.env.example` or source control.
+
+Apply migrations and start the development server:
 
 ```powershell
 python manage.py migrate
-python manage.py createsuperuser
 python manage.py runserver
 ```
 
-The API is at `http://127.0.0.1:8000`. Health check: `GET /api/health/` returns `{"status":"ok","database":"connected"}` when the database is reachable.
+The API is available at `http://127.0.0.1:8000`. `GET /api/health/` checks database connectivity. Never commit `.env` or real credentials.
 
 ## Authentication
 
-Register with `POST /api/auth/register/`:
+Register at `POST /api/auth/register/`:
 
 ```json
 {"name":"Alex Smith","email":"alex@example.com","password":"Use-a-strong-password-123"}
 ```
 
-Success is HTTP 201 with user ID, name and normalized email; the password is never returned. Passwords must meet Django's configured validators.
-
-Login with `POST /api/auth/login/`:
+Login at `POST /api/auth/login/`:
 
 ```json
 {"email":"alex@example.com","password":"Use-a-strong-password-123"}
 ```
 
-Success (HTTP 200): `{"access":"<JWT>","refresh":"<JWT>"}`. Access tokens last 15 minutes and refresh tokens one day. Refresh at `POST /api/auth/token/refresh/` with `{"refresh":"<JWT>"}`; refresh rotation is enabled and the previous refresh token is blacklisted. Login, registration, and refresh endpoints have per-IP throttles (10/minute, 5/hour, and 30/minute). Send the access token on protected requests as `Authorization: Bearer <access>`.
+Login returns `access` and `refresh` JWTs. Send the access token on protected requests as `Authorization: Bearer <access>`. Refresh at `POST /api/auth/token/refresh/` with `{"refresh":"<refresh-token>"}`. Access tokens last 15 minutes; refresh tokens last one day and rotate on use.
 
-## Endpoints
+## API endpoints
 
-All endpoints below except registration, login, token refresh, and health require a valid bearer token. Lists are page-number paginated (50 results per page), returning `count`, `next`, `previous`, and `results`.
+All endpoints require a bearer token except registration, login, token refresh, and health. List responses are paginated.
 
-| Method | Path | Behavior |
+| Method | Path | Description |
 | --- | --- | --- |
-| POST | `/api/auth/register/` | Create account |
-| POST | `/api/auth/login/` | Get access and refresh JWTs |
-| POST | `/api/auth/token/refresh/` | Refresh access token |
-| POST | `/api/patients/` | Create own patient |
-| GET | `/api/patients/` | List own patients |
-| GET / PUT / DELETE | `/api/patients/<id>/` | Read, replace, or delete own patient |
-| POST | `/api/doctors/` | Create doctor; creator owns write access |
+| POST | `/api/auth/register/` | Register with name, email, and password |
+| POST | `/api/auth/login/` | Obtain JWT access and refresh tokens |
+| POST | `/api/auth/token/refresh/` | Rotate a refresh token |
+| POST | `/api/patients/` | Create a patient owned by the current user |
+| GET | `/api/patients/` | List the current user's patients |
+| GET, PUT, DELETE | `/api/patients/<id>/` | Retrieve, update, or delete an owned patient |
+| POST | `/api/doctors/` | Create a doctor; the creator controls updates and deletion |
 | GET | `/api/doctors/` | List all doctors |
 | GET | `/api/doctors/<id>/` | Retrieve any doctor |
-| PUT / DELETE | `/api/doctors/<id>/` | Update/delete only a doctor you created |
-| POST | `/api/mappings/` | Assign doctor to own patient |
-| GET | `/api/mappings/` | List assignments for own patients |
-| GET | `/api/mappings/<patient_id>/` | List doctors assigned to that owned patient |
-| DELETE | `/api/mappings/<mapping_id>/` | Delete an assignment belonging to own patient |
-| GET | `/api/health/` | Database connectivity health check |
+| PUT, DELETE | `/api/doctors/<id>/` | Update or delete a doctor you created |
+| POST | `/api/mappings/` | Assign a doctor to one of your patients |
+| GET | `/api/mappings/` | List mappings for your patients |
+| GET | `/api/mappings/<patient_id>/` | List doctors assigned to an owned patient |
+| DELETE | `/api/mappings/<mapping_id>/` | Delete a mapping for an owned patient |
+| GET | `/api/health/` | Check database connectivity |
 
-The mapping detail route uses its integer as a **patient ID for GET** and a **mapping ID for DELETE**, as specified by the assignment. The two operations are distinguished by HTTP method.
+The mapping detail route uses a patient ID for `GET` and a mapping ID for `DELETE`. A patient-doctor pair can only be assigned once. Cross-owner patient and mapping lookups return 404. Invalid input returns 400; missing or invalid authentication returns 401; attempts to delete an assigned doctor return 409.
 
-Create a patient:
+Create a patient with `POST /api/patients/`:
 
 ```json
 {"name":"Jordan Lee","date_of_birth":"1990-04-15","gender":"unspecified","email":"jordan@example.com","phone":"555-0100","address":"100 Main Street"}
 ```
 
-Create a doctor:
+Create a doctor with `POST /api/doctors/`:
 
 ```json
 {"name":"Morgan Chen","specialization":"Cardiology","email":"morgan@example.com","phone":"555-0199","clinic_address":"10 Clinic Road"}
 ```
 
-Create an assignment:
+Assign that doctor to a patient with `POST /api/mappings/`:
 
 ```json
 {"patient":1,"doctor":1}
 ```
 
-An assignment response has `id`, `patient`, `doctor`, and `created_at`. Duplicate patient-doctor pairs return HTTP 400. Cross-owner patient/mapping access returns 404 so record existence is not disclosed. Missing resources return 404, invalid fields return 400, missing/invalid authentication returns 401, auth throttles return 429, and deletion of an assigned doctor returns 409.
+Example authenticated request:
 
-Example using curl:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/auth/login/ \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"alex@example.com","password":"Use-a-strong-password-123"}'
-
-curl http://127.0.0.1:8000/api/patients/ \
-  -H 'Authorization: Bearer YOUR_ACCESS_TOKEN'
+```powershell
+curl.exe http://127.0.0.1:8000/api/patients/ -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-The same requests can be imported into Postman or run with curl. JSON validation errors use DRF's field-keyed format, for example `{"name":["This field is required."]}`.
+Patient fields are name, date of birth, gender, email, phone, and address. Doctor fields are name, specialization, email, phone, and clinic address. IDs, ownership, and timestamps are managed by the server.
 
 ## Tests and checks
 
@@ -132,16 +117,10 @@ python manage.py check
 python manage.py makemigrations --check --dry-run
 ```
 
-Run the deployment check with production settings loaded. For example, in PowerShell set `DEBUG=False`, a generated `SECRET_KEY`, and the deployment's `ALLOWED_HOSTS`, then run `python manage.py check --deploy`. With the local `DEBUG=True` configuration, Django correctly reports production-only security warnings.
+The local PostgreSQL configuration above was verified against database `healthcare_test`: migrations applied, `makemigrations --check --dry-run` reported no changes, and all 7 tests passed using Django's PostgreSQL test database. SQLite test results do not verify a PostgreSQL connection.
 
-Tests cover registration, case-insensitive duplicates, successful and failed login, JWT-protected access, refresh rotation and revocation, patient CRUD/isolation, doctor CRUD/permissions, mapping creation/list/retrieval/deletion and cross-owner privacy, duplicate and invalid references, health, and doctor deletion protection. Configure a PostgreSQL `DATABASE_URL` before tests to exercise them against PostgreSQL; the default test database otherwise uses SQLite.
+For a production configuration check, set `DEBUG=False`, a private `SECRET_KEY`, and the deployment host in `ALLOWED_HOSTS`, then run `python manage.py check --deploy`.
 
-## Deployment (Render blueprint)
+## Deployment configuration
 
-`render.yaml` defines a Gunicorn web service, managed PostgreSQL, generated secret, HTTPS redirect, static collection, and a pre-deploy migration. It uses Render's current `0.5c-512mb` web and `0.1c-256mb` PostgreSQL plan IDs. Based on [Render's current pricing](https://render.com/pricing), these are approximately $7/month and $6/month respectively; the free PostgreSQL plan expires after 30 days, so it is not configured for a persistent production database. This workspace has no Render account access, so no service was provisioned and no hosted URL is claimed. Set `ALLOWED_HOSTS` to the actual service hostname if it changes. Configure environment variables in the provider dashboard, never in source control.
-
-The API's production database is PostgreSQL when `DATABASE_URL` is supplied. Production startup requires `DEBUG=False`, a strong `SECRET_KEY`, and the correct `ALLOWED_HOSTS`. Health monitoring should use `/api/health/`.
-
-## Repository status and limitations
-
-This project is published at [github.com/vivekchaudhary777/Django-healthcare-backend](https://github.com/vivekchaudhary777/Django-healthcare-backend) on the `master` branch. The unrelated local `info.html` and `main.html` files are not part of the current branch. No live deployment or production API has been configured or verified. PostgreSQL settings are supported, but a production PostgreSQL connection has not been verified in this environment.
+`render.yaml` describes a Gunicorn web service and managed PostgreSQL database, with static collection and migrations before deployment. Review the provider's current plans and charges before creating services. This repository has not been deployed; no live URL or production database is verified.
