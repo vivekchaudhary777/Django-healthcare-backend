@@ -144,4 +144,4 @@ The API's production database is PostgreSQL when `DATABASE_URL` is supplied. Pro
 
 ## Repository status and limitations
 
-The source directory initially had no Git remote and the GitHub CLI is not installed. The project is committed locally, but publishing requires authenticated GitHub access and a repository remote. No live deployment, PostgreSQL server, or production API has been configured or verified in this environment.
+This project is published at [github.com/vivekchaudhary777/Django-healthcare-backend](https://github.com/vivekchaudhary777/Django-healthcare-backend) on the `master` branch. The unrelated local `info.html` and `main.html` files are not part of the current branch. No live deployment or production API has been configured or verified. PostgreSQL settings are supported, but a production PostgreSQL connection has not been verified in this environment.
